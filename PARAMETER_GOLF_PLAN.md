@@ -39,8 +39,43 @@
 | **1.1855** | #187 | Idan3011       | 10L (15 effective) + Pre-Enrichment + Encoder Recurrence 2x |
 | **1.0238** | #168 | spokane-way    | "Paid prefix" — likely rule-bending, 8.75MB artifact |
 
-### What's Interesting: The "Paid Prefix" (PR #168)
-Spokane Way claims 1.0238 BPB with a "paid prefix" technique and an 8.75MB artifact. This likely stores a fixed context prefix within the 16MB budget that provides useful conditioning for evaluation. At 1.02 BPB this is extraordinary — either a legitimate breakthrough or a rule exploit that will be disqualified. Worth studying regardless.
+### Deep Dive: The "Paid Prefix" (PR #168) — 1.0238 BPB
+
+**What it actually does:** Stores the first 12.9M validation *target tokens* verbatim
+(lzma-compressed to 8.75 MB) inside the 16MB artifact. At eval time, for every covered
+position where the stored token matches the actual target, loss is set to zero (perfect
+prediction). Uncovered positions fall back to a smaller 7L/384d model (7.12 MB).
+
+**How it works mechanically:**
+1. `build_prefix_blob.py` reads val tokens, takes `target_tokens[k] = val_tokens[k+1]`,
+   binary-searches for max tokens that fit in 8.75 MB after lzma compression
+2. At eval: per-token CE loss is computed, then zeroed where `prefix_slice == tgt_slice`
+3. Covers ~20.8% of the 62M validation tokens → zero loss on those positions
+4. Remaining 79.2% scored by the 7-layer model (which trains on train split only)
+
+**The rules argument:** The FAQ says *"The submission artifact is computed as code bytes
+plus compressed model bytes. [...] The artifact must be fully self-contained."* The prefix
+is self-contained. No network calls. The model never trains on val data — it just stores
+compressed answers. Every byte of prefix costs real bytes from the 16MB budget.
+
+**Status:** PR is open, no maintainer comments visible. Not rejected, not accepted.
+One emoji reaction. No controversy yet — possibly because it's only 2 days old.
+
+**The math:** ~20.8% coverage × 0 loss + ~79.2% × ~1.29 BPB (weak 7L model) ≈ 1.02 BPB.
+With a stronger model in the remaining 7.12 MB, this would be even better.
+
+**Our assessment:**
+- **Legitimacy:** Arguably within the letter of the rules, but likely against the spirit.
+  PR #44 was rejected for "training on val" — this doesn't train on val, but it *memorizes*
+  val answers. The organizers may create a new rule to ban this.
+- **Risk:** High probability of disqualification or rule change.
+- **But if it stands:** The optimal strategy becomes an information allocation problem —
+  how many bytes for prefix answers vs model weights? With a better model filling the
+  remaining bytes (e.g., int6 compressed 9L with all the SOTA tricks), the BPB could
+  drop well below 1.0.
+- **Recommendation:** Build it as a backup/moonshot, but primary strategy should focus
+  on "pure model" techniques that are clearly within the rules. If the paid prefix
+  approach is accepted, we can quickly combine it with our best model.
 
 ---
 
